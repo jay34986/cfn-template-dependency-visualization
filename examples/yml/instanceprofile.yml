@@ -1,0 +1,39 @@
+Resources:
+  Ec2Role:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+            Action:
+              - "sts:AssumeRole"
+      Policies:
+        - PolicyName: S3ListPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action:
+                  - "s3:List*"
+                Resource:
+                  # バケットARN
+                  - !ImportValue ArnS3Bucket
+                  # バケット内オブジェクトのARN
+                  - !Sub
+                    - "${BucketArn}/*"
+                    - BucketArn: {'Fn::ImportValue': 'ArnS3Bucket'}
+
+  InstanceProfile:
+    Type: "AWS::IAM::InstanceProfile"
+    DeletionPolicy: "Delete"
+    Properties:
+
+Outputs:
+  InstanceProfile:
+    Value: !Ref InstanceProfile
+    Export:
+      Name: InstanceProfileName

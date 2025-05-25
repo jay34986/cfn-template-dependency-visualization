@@ -1,0 +1,9 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Resources:
+  MyBucket:
+    Type: AWS::S3::Bucket
+Outputs:
+  MyBucketExport:
+    Value: !Ref MyBucket
+    Export:
+      Name: MyBucketExportName

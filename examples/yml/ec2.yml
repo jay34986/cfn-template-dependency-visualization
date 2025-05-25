@@ -1,0 +1,19 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+Resources:
+  Ec2Instance01:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: ami-0ff21806645c5e492
+      InstanceType: t2.micro
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: true
+          SubnetId: !ImportValue VpcStackPublicSubnet
+          GroupSet: [!ImportValue VpcStackSecurityGroup]
+
+  Ec2Instance02:
+    Type: AWS::EC2::Instance
+    Properties:
+      AvailabilityZone: ap-northeast-1a
+      ImageId: ami-0ff21806645c5e492
+      IamInstanceProfile: !ImportValue InstanceProfileName

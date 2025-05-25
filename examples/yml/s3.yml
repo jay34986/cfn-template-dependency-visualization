@@ -1,0 +1,11 @@
+Resources:
+  ArtifactBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "bucket-${AWS::AccountId}"
+
+Outputs:
+  BucketArn:
+    Value: !GetAtt ArtifactBucket.Arn
+    Export:
+      Name: ArnS3Bucket

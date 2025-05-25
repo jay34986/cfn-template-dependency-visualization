@@ -1,0 +1,8 @@
+AWSTemplateFormatVersion
+Description: Import用テンプレート
+Resources:
+  ImportedBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName:
+        Fn::ImportValue: MyBucketExportName
