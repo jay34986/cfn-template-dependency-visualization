@@ -6,3 +6,6 @@ dependencies =  [
     "cfn-flip >= 1.3.0",
     "colorama >= 0.4.6",
 ]
+
+[project.scripts]
+cfn-tdv = "cfn-template-dependency-visualization.main:main"
