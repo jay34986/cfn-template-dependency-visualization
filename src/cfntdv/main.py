@@ -6,6 +6,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
+from typing import Any
 
 from cfn_flip import to_json
 from colorama import Fore, Style, init
@@ -48,7 +49,7 @@ def find_cfn_templates(directory: str) -> list[str]:
     return list(target_dir.glob("*.yml")) + list(target_dir.glob("*.yaml"))
 
 
-def find_imports(obj: dict[str, any] | list[any], imports: set[str]) -> None:
+def find_imports(obj: dict[str, Any] | list[Any], imports: set[str]) -> None:
     """Recursively find all Fn::ImportValue references in the given object."""
     target_key = "Fn::ImportValue"
     if isinstance(obj, dict):  # In the case of dictionary type
@@ -66,7 +67,7 @@ def extract_exports_and_imports(filepath: str) -> dict:
     with Path(filepath).open(encoding="utf-8") as f:
         try:
             data = to_json(f.read(), clean_up=True)  # Convert YAML to JSON
-        except json.decoder.JSONDecodeError as e:
+        except json.JSONDecodeError as e:
             print(  # noqa: T201
                 Fore.RED
                 + Style.BRIGHT

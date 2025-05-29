@@ -7,7 +7,7 @@ from pathlib import Path
 
 import yaml
 
-sys.path.append(Path(__file__).parent.parent.parent.as_posix())
+sys.path.append(str(Path(__file__).parent.parent.parent / "src" / "cfntdv"))
 
 from main import (
     build_dependency_graph,
