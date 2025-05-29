@@ -8,4 +8,4 @@ dependencies =  [
 ]
 
 [project.scripts]
-cfn-tdv = "cfn-template-dependency-visualization.main:main"
+cfn-tdv = "cfn_template_dependency_visualization.main:main"
