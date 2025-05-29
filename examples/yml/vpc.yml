@@ -1,0 +1,44 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Resources:
+  Vpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: "10.0.0.0/16"
+
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: "10.0.1.0/24"
+      AvailabilityZone: ap-northeast-1a
+
+  SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: "Security Group"
+      VpcId: !Ref Vpc
+      SecurityGroupIngress:
+        - CidrIp: 0.0.0.0/0
+          IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+
+  Ec2Instance03:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: ami-0ff21806645c5e492
+      InstanceType: t2.micro
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: true
+          SubnetId: !ImportValue VpcStackPublicSubnet
+          GroupSet: [!ImportValue VpcStackSecurityGroup]
+
+Outputs:
+  SecurityGroupIds:
+    Value: !Ref SecurityGroup
+    Export:
+      Name: VpcStackSecurityGroup
+  SubnetId:
+    Value: !Ref PublicSubnet
+    Export:
+      Name: VpcStackPublicSubnet
