@@ -8,4 +8,4 @@ dependencies =  [
 ]
 
 [project.scripts]
-cfn-tdv = "cfn_tdv.main:main"
+cfn-tdv = "cfntdv.main:main"
