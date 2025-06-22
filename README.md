@@ -19,20 +19,31 @@ The analysis results are output to standard output in Mermaid format as shown be
 The following example shows that s3import.yaml references MyBucketExportName, which is exported in s3export.yaml.  
 
 ```mermaid
-graph BT
+graph LR
     s3import.yaml-->|MyBucketExportName|s3export.yaml
 ```
 
-Use the -d option to specify the directory where the CFn templates are saved.  
+Use the `-d` option to specify the directory where the CFn templates are saved.  
 
 ```bash
 cfn-tdv -d examples/yaml/
 ```
 
-To output the analysis results to a file, specify the -o option.  
+To output the analysis results to a file, specify the `-o` option.  
 
 ```bash
 cfn-tdv -o result.md
+```
+
+You can specify the direction of the Mermaid diagram using the `-D` or `--direction` option.  
+The default is `LR` (left to right).  
+You can also choose `BT` (bottom to top).
+
+- `-D LR` : Left to right (default)
+- `-D BT` : Bottom to top
+
+```bash
+cfn-tdv -D BT
 ```
 
 ## Detecting self-references
@@ -50,7 +61,7 @@ cfn-tdv -d examples/yml
 ```
 
 ```mermaid
-graph BT
+graph LR
     vpc.yml-->|VpcStackSecurityGroup|vpc.yml
     vpc.yml-->|VpcStackPublicSubnet|vpc.yml
     instanceprofile.yml-->|ArnS3Bucket|s3.yml
