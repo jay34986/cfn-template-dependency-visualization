@@ -40,6 +40,16 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Output detailed logs",
     )
+    parser.add_argument(
+        "-D",
+        "--direction",
+        default="LR",
+        choices=["LR", "BT"],
+        help=(
+            "Direction of Mermaid diagram (LR: Left to right, BT: Bottom to top). "
+            "Default: LR"
+        ),
+    )
     return parser.parse_args(args=sys.argv[1:])
 
 
@@ -135,9 +145,20 @@ def check_self_reference(template_info: dict) -> None:
                 )
 
 
-def generate_mermaid_text(edges: list, output_file: str | None = None) -> None:
-    """Generate and output Mermaid diagram text."""
-    mermaid_lines = ["# CFn template dependency\n\n```mermaid", "graph BT"]
+def generate_mermaid_text(
+    edges: list,
+    output_file: str | Path | None = None,
+    direction: str = "LR",
+) -> None:
+    """Generate and output Mermaid diagram text.
+
+    Args:
+        edges (list): List of tuples representing dependencies in the form (source, destination, import_value).
+        output_file (str | None, optional): If specified, the Mermaid diagram will be written to this file; otherwise, output is printed to stdout.
+        direction (str, optional): Direction of the Mermaid diagram ('LR' for left-to-right, 'BT' for bottom-to-top). Default is 'LR'.
+
+    """  # noqa: E501
+    mermaid_lines = ["# CFn template dependency\n\n```mermaid", f"graph {direction}"]
     for src, dst, imp in edges:
         mermaid_lines.append(f"    {Path(src).name}-->|{imp}|{Path(dst).name}")
     mermaid_lines.append("```\n")
@@ -157,7 +178,7 @@ def main() -> None:
     template_info = collect_template_info(templates, verbose=args.verbose)
     _, edges = build_dependency_graph(template_info)
     check_self_reference(template_info)
-    generate_mermaid_text(edges, args.output_file)
+    generate_mermaid_text(edges, args.output_file, direction=args.direction)
 
 
 if __name__ == "__main__":
