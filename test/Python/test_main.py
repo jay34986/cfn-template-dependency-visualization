@@ -30,17 +30,28 @@ def test_parse_args_default() -> None:
         assert args.directory == "."  # noqa: S101
         assert args.output_file is None  # noqa: S101
         assert args.verbose is False  # noqa: S101
+        assert args.direction == "LR"  # noqa: S101
     finally:
         sys.argv = original_argv  # sys.argvを元に戻す
 
 
 def test_parse_args_custom() -> None:
     """Test parse_args() with custom arguments."""
-    sys.argv = ["main.py", "-d", "/path/to/dir", "-o", "output.md", "-v"]
+    sys.argv = [
+        "main.py",
+        "-d",
+        "/path/to/dir",
+        "-o",
+        "output.md",
+        "-v",
+        "-D",
+        "BT",
+    ]
     args = parse_args()
     assert args.directory == "/path/to/dir"  # noqa: S101
     assert args.output_file == "output.md"  # noqa: S101
     assert args.verbose is True  # noqa: S101
+    assert args.direction == "BT"  # noqa: S101
 
 
 def test_find_cfn_templates() -> None:
@@ -220,15 +231,28 @@ def test_generate_mermaid_text() -> None:
     ]
     captured_output = io.StringIO()
     sys.stdout = captured_output
-    generate_mermaid_text(edges)
+    generate_mermaid_text(edges)  # デフォルトはLR
     sys.stdout = sys.__stdout__
     assert captured_output.getvalue().startswith(  # noqa: S101
         "# CFn template dependency\n\n```mermaid",
     )
-    assert "graph BT" in captured_output.getvalue()  # noqa: S101
+    assert "graph LR" in captured_output.getvalue()  # noqa: S101
     assert "template1.yaml-->|Export1|template2.yaml" in captured_output.getvalue()  # noqa: S101
     assert "template2.yaml-->|Export2|template3.yaml" in captured_output.getvalue()  # noqa: S101
     assert captured_output.getvalue().endswith("```\n\n")  # noqa: S101
+
+
+def test_generate_mermaid_text_bt() -> None:
+    """Test the generate_mermaid_text function with BT direction."""
+    edges = [
+        ("template1.yaml", "template2.yaml", "Export1"),
+        ("template2.yaml", "template3.yaml", "Export2"),
+    ]
+    captured_output = io.StringIO()
+    sys.stdout = captured_output
+    generate_mermaid_text(edges, direction="BT")
+    sys.stdout = sys.__stdout__
+    assert "graph BT" in captured_output.getvalue()  # noqa: S101
 
 
 def test_generate_mermaid_text_with_output_file() -> None:
@@ -239,12 +263,27 @@ def test_generate_mermaid_text_with_output_file() -> None:
     ]
     with tempfile.TemporaryDirectory() as tmpdir:
         output_file = Path(tmpdir) / "output.md"
-        generate_mermaid_text(edges, output_file)
+        generate_mermaid_text(edges, output_file, direction="LR")
         assert output_file.exists()  # noqa: S101
         with output_file.open() as f:
             mermaid_text = f.read()
             assert mermaid_text.startswith("# CFn template dependency\n\n```mermaid")  # noqa: S101
-            assert "graph BT" in mermaid_text  # noqa: S101
+            assert "graph LR" in mermaid_text  # noqa: S101
             assert "template1.yaml-->|Export1|template2.yaml" in mermaid_text  # noqa: S101
             assert "template2.yaml-->|Export2|template3.yaml" in mermaid_text  # noqa: S101
             assert mermaid_text.endswith("```\n")  # noqa: S101
+
+
+def test_generate_mermaid_text_with_output_file_default_direction() -> None:
+    """Test generate_mermaid_text writes 'graph LR' when direction is omitted and writing to a file."""  # noqa: E501
+    edges = [
+        ("template1.yaml", "template2.yaml", "Export1"),
+        ("template2.yaml", "template3.yaml", "Export2"),
+    ]
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_file = Path(tmpdir) / "output_default.md"
+        generate_mermaid_text(edges, output_file)
+        assert output_file.exists()  # noqa: S101
+        with output_file.open() as f:
+            mermaid_text = f.read()
+            assert "graph LR" in mermaid_text  # noqa: S101
