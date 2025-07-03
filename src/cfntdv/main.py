@@ -4,12 +4,17 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Any
 
 from cfn_flip import to_json
 from colorama import Fore, Style, init
+
+# Shared regex patterns
+DYNAMIC_REF_PATTERN = re.compile(r"\{\{resolve:[^}]+}}")
+DYN_NODE_PATTERN = re.compile(r"\{\{resolve:(ssm|ssm-secure|secretsmanager):(.+?)}}")
 
 # Colorama Initialization
 init(autoreset=True)
@@ -72,8 +77,29 @@ def find_imports(obj: dict[str, Any] | list[Any], imports: set[str]) -> None:
             find_imports(item, imports)
 
 
+def find_dynamic_references(obj: object, dynamics: set[str]) -> None:
+    """Recursively find all dynamic references ({{resolve:...}}) in the given object.
+
+    AWS: https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/dynamic-references.html
+    """
+    if isinstance(obj, dict):
+        for value in obj.values():
+            find_dynamic_references(value, dynamics)
+    elif isinstance(obj, list):
+        for item in obj:
+            find_dynamic_references(item, dynamics)
+    elif isinstance(obj, str):
+        for match in DYNAMIC_REF_PATTERN.findall(obj):
+            dynamics.add(match)
+
+
 def extract_exports_and_imports(filepath: str) -> dict:
-    """Extract exported and imported values from a CloudFormation template file."""
+    """Extract dependencies from a CloudFormation template file.
+
+    Extract exported, imported values, and dynamic references from a CloudFormation
+    template file.
+    Returns a dict with keys 'exports', 'imports', and 'dynamics'.
+    """
     with Path(filepath).open(encoding="utf-8") as f:
         try:
             data = to_json(f.read(), clean_up=True)  # Convert YAML to JSON
@@ -86,6 +112,7 @@ def extract_exports_and_imports(filepath: str) -> dict:
             sys.exit(1)
     exports = set()
     imports = set()
+    dynamics = set()
 
     # Convert JSON to Python dictionary
     parsed_data = json.loads(data)
@@ -94,7 +121,6 @@ def extract_exports_and_imports(filepath: str) -> dict:
     key_to_find = "Outputs"
     if key_to_find in parsed_data:
         outputs = parsed_data.get(key_to_find)
-
         for v in outputs.values():
             export = v.get("Export", {}).get("Name")
             if export:
@@ -102,11 +128,13 @@ def extract_exports_and_imports(filepath: str) -> dict:
 
     # Fn::ImportValue reference extraction
     find_imports(parsed_data, imports)
-    return {"exports": exports, "imports": imports}
+    # Dynamic reference extraction
+    find_dynamic_references(parsed_data, dynamics)
+    return {"exports": exports, "imports": imports, "dynamics": dynamics}
 
 
 def collect_template_info(templates: list[str], *, verbose: bool = False) -> dict:
-    """Collect export/import info from each template."""
+    """Collect export/import/dynamic info from each template."""
     template_info = {}
     if verbose:
         print(f"Exploration Templates: {templates}")  # noqa: T201
@@ -117,7 +145,7 @@ def collect_template_info(templates: list[str], *, verbose: bool = False) -> dic
 
 
 def build_dependency_graph(template_info: dict) -> tuple[dict, list]:
-    """Build dependency graph nodes and edges."""
+    """Build dependency graph nodes and edges (including dynamic references)."""
     nodes = {}
     for path, info in template_info.items():
         for export in info["exports"]:
@@ -126,9 +154,13 @@ def build_dependency_graph(template_info: dict) -> tuple[dict, list]:
     for path, info in template_info.items():
         for imp in info["imports"]:
             if imp in nodes:
-                edges.append((path, nodes[imp], imp))
+                edges.append((path, nodes[imp], imp, "import"))
             else:
-                edges.append((path, "(unknown)", imp))
+                edges.append((path, "(unknown)", imp, "import"))
+        # Since the dynamic reference is an external resource reference,
+        # dst is the dynamic reference name itself.
+        # AWS: https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/dynamic-references.html
+        edges.extend((path, dyn, dyn, "dynamic") for dyn in info.get("dynamics", set()))
     return nodes, edges
 
 
@@ -152,15 +184,27 @@ def generate_mermaid_text(
 ) -> None:
     """Generate and output Mermaid diagram text.
 
-    Args:
-        edges (list): List of tuples representing dependencies in the form (source, destination, import_value).
-        output_file (str | None, optional): If specified, the Mermaid diagram will be written to this file; otherwise, output is printed to stdout.
-        direction (str, optional): Direction of the Mermaid diagram ('LR' for left-to-right, 'BT' for bottom-to-top). Default is 'LR'.
-
-    """  # noqa: E501
+    Dynamic references are output in cylindrical form.
+    AWS: https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/dynamic-references.html
+    """
     mermaid_lines = ["# CFn template dependency\n\n```mermaid", f"graph {direction}"]
-    for src, dst, imp in edges:
-        mermaid_lines.append(f"    {Path(src).name}-->|{imp}|{Path(dst).name}")
+    edge_lines = []
+    for src, dst, imp, typ in edges:
+        src_name = Path(src).name if src not in ("(unknown)",) else src
+        if typ == "dynamic":
+            m = DYN_NODE_PATTERN.fullmatch(imp)
+            if m:
+                label = m.group(1)
+                node = m.group(2)
+            else:
+                label = "dynamic"
+                node = imp
+            edge_lines.append(f"    {src_name}-->|{label}|{node}[({node})]")
+        else:
+            dst_name = Path(dst).name if dst not in ("(unknown)",) else dst
+            edge_lines.append(f"    {src_name}-->|{imp}|{dst_name}")
+    edge_lines.sort()
+    mermaid_lines.extend(edge_lines)
     mermaid_lines.append("```\n")
     mermaid_text = "\n".join(mermaid_lines)
     if output_file:
