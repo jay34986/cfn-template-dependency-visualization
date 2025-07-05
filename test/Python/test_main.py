@@ -24,7 +24,7 @@ from main import (
 def test_parse_args_default() -> None:
     """Test parse_args() with default arguments."""
     original_argv = sys.argv
-    sys.argv = [sys.argv[0]]  # sys.argvを修正する
+    sys.argv = [sys.argv[0]]  # Fix sys.argv
     try:
         args = parse_args()
         assert args.directory == "."  # noqa: S101
@@ -32,7 +32,7 @@ def test_parse_args_default() -> None:
         assert args.verbose is False  # noqa: S101
         assert args.direction == "LR"  # noqa: S101
     finally:
-        sys.argv = original_argv  # sys.argvを元に戻す
+        sys.argv = original_argv  # Revert sys.argv
 
 
 def test_parse_args_custom() -> None:
@@ -89,7 +89,7 @@ def test_find_imports() -> None:
 def test_extract_exports_and_imports_basic() -> None:
     """Test extracting exports and imports from a basic CloudFormation template."""
     with tempfile.TemporaryDirectory() as tmpdir:
-        # Export/Importのあるテンプレート
+        # Templates with Export/Import
         path = Path(tmpdir) / "sample.yaml"
         content = {
             "Outputs": {"ExportedValue": {"Export": {"Name": "MyExport"}}},
@@ -163,6 +163,37 @@ def test_extract_exports_and_imports_dynamic_reference() -> None:
         result = extract_exports_and_imports(path)
         assert "{{resolve:ssm-secure:MyParam:1}}" in result["dynamics"]  # noqa: S101
         assert "{{resolve:ssm:TagParam:latest}}" in result["dynamics"]  # noqa: S101
+
+
+def test_extract_exports_and_imports_dynamic_reference_with_var() -> None:
+    """Test extracting dynamic references with ${...} from a CloudFormation template."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        path = Path(tmpdir) / "rds.yml"
+        content = {
+            "Resources": {
+                "DBInstance": {
+                    "Type": "AWS::RDS::DBInstance",
+                    "Properties": {
+                        "MasterUsername": (
+                            "{{resolve:secretsmanager:${MySecret}:SecretString:username}}"
+                        ),
+                        "MasterUserPassword": (
+                            "{{resolve:secretsmanager:${MySecret}:SecretString:password}}"
+                        ),
+                    },
+                },
+            },
+        }
+        create_yaml(path, content)
+        result = extract_exports_and_imports(path)
+        assert (  # noqa: S101
+            "{{resolve:secretsmanager:${MySecret}:SecretString:username}}"
+            in result["dynamics"]
+        )
+        assert (  # noqa: S101
+            "{{resolve:secretsmanager:${MySecret}:SecretString:password}}"
+            in result["dynamics"]
+        )
 
 
 EXPECTED_TEMPLATE_COUNT = 2

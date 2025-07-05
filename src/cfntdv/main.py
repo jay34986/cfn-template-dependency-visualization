@@ -13,8 +13,15 @@ from cfn_flip import to_json
 from colorama import Fore, Style, init
 
 # Shared regex patterns
-DYNAMIC_REF_PATTERN = re.compile(r"\{\{resolve:[^}]+}}")
+DYNAMIC_REF_PATTERN = re.compile(r"\{\{resolve:.*?}}")
+# Also supports secretsmanager:${MySecret}:SecretString:username
 DYN_NODE_PATTERN = re.compile(r"\{\{resolve:(ssm|ssm-secure|secretsmanager):(.+?)}}")
+
+
+def normalize_dynamic_node(node: str) -> str:
+    """Convert ${Var} to $Var for Mermaid node names."""
+    return re.sub(r"\$\{([A-Za-z0-9_]+)\}", r"$\1", node)
+
 
 # Colorama Initialization
 init(autoreset=True)
@@ -186,6 +193,7 @@ def generate_mermaid_text(
 
     Dynamic references are output in cylindrical form.
     AWS: https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/dynamic-references.html
+    Mermaid: https://mermaid.js.org/syntax/flowchart.html#cylindrical-shape
     """
     mermaid_lines = ["# CFn template dependency\n\n```mermaid", f"graph {direction}"]
     edge_lines = []
@@ -195,10 +203,10 @@ def generate_mermaid_text(
             m = DYN_NODE_PATTERN.fullmatch(imp)
             if m:
                 label = m.group(1)
-                node = m.group(2)
+                node = normalize_dynamic_node(m.group(2))
             else:
                 label = "dynamic"
-                node = imp
+                node = normalize_dynamic_node(imp)
             edge_lines.append(f"    {src_name}-->|{label}|{node}[({node})]")
         else:
             dst_name = Path(dst).name if dst not in ("(unknown)",) else dst
