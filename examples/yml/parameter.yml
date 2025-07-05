@@ -1,0 +1,9 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Resources:
+  MyParameter01:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Type: String
+      Value: !Sub
+        - "Parameter is ${Parameter}"
+        - Parameter: "{{resolve:ssm:SG-stack-name:1}}"
