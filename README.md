@@ -19,6 +19,16 @@ Install it using pipx.
 pipx install git+https://github.com/jay34986/cfn-template-dependency-visualization.git
 ```
 
+## Version
+
+You can check the version of the tool with the following command:
+
+```bash
+cfn-tdv -V
+# or
+cfn-tdv --version
+```
+
 ## Basic Usage
 
 If you run the cfn-tdv command without any arguments, it analyzes files with .yaml and .yml extensions in the current directory.  

@@ -1,10 +1,12 @@
 """Unit tests for main.py CloudFormation template utilities."""
 
+import importlib.metadata
 import io
 import sys
 import tempfile
 from pathlib import Path
 
+import pytest
 import yaml
 
 sys.path.append(str(Path(__file__).parent.parent.parent / "src" / "cfntdv"))
@@ -18,6 +20,7 @@ from main import (
     find_imports,
     generate_mermaid_text,
     parse_args,
+    print_version_and_exit,
 )
 
 
@@ -52,6 +55,28 @@ def test_parse_args_custom() -> None:
     assert args.output_file == "output.md"  # noqa: S101
     assert args.verbose is True  # noqa: S101
     assert args.direction == "BT"  # noqa: S101
+
+
+def test_parse_args_version() -> None:
+    """Test parse_args() with version argument."""
+    original_argv = sys.argv
+    sys.argv = [sys.argv[0], "-V"]
+    try:
+        args = parse_args()
+        assert args.version is True  # noqa: S101
+    finally:
+        sys.argv = original_argv
+
+
+def test_parse_args_version_long() -> None:
+    """Test parse_args() with long form version argument."""
+    original_argv = sys.argv
+    sys.argv = [sys.argv[0], "--version"]
+    try:
+        args = parse_args()
+        assert args.version is True  # noqa: S101
+    finally:
+        sys.argv = original_argv
 
 
 def test_find_cfn_templates() -> None:
@@ -287,17 +312,14 @@ def test_check_self_reference_no_warning() -> None:
     assert captured_output.getvalue() == ""  # noqa: S101
 
 
-def test_generate_mermaid_text() -> None:
+def test_generate_mermaid_text(capsys: pytest.CaptureFixture[str]) -> None:
     """Test the generate_mermaid_text function."""
     edges = [
         ("template1.yaml", "template2.yaml", "Export1", "import"),
         ("template2.yaml", "template3.yaml", "Export2", "import"),
     ]
-    captured_output = io.StringIO()
-    sys.stdout = captured_output
     generate_mermaid_text(edges)
-    sys.stdout = sys.__stdout__
-    out = captured_output.getvalue()
+    out = capsys.readouterr().out
     assert out.startswith("# CFn template dependency\n\n```mermaid")  # noqa: S101
     assert "graph LR" in out  # noqa: S101
     assert "template1.yaml-->|Export1|template2.yaml" in out  # noqa: S101
@@ -305,17 +327,15 @@ def test_generate_mermaid_text() -> None:
     assert out.endswith("```\n\n")  # noqa: S101
 
 
-def test_generate_mermaid_text_bt() -> None:
+def test_generate_mermaid_text_bt(capsys: pytest.CaptureFixture[str]) -> None:
     """Test the generate_mermaid_text function with BT direction."""
     edges = [
         ("template1.yaml", "template2.yaml", "Export1", "import"),
         ("template2.yaml", "template3.yaml", "Export2", "import"),
     ]
-    captured_output = io.StringIO()
-    sys.stdout = captured_output
     generate_mermaid_text(edges, direction="BT")
-    sys.stdout = sys.__stdout__
-    assert "graph BT" in captured_output.getvalue()  # noqa: S101
+    out = capsys.readouterr().out
+    assert "graph BT" in out  # noqa: S101
 
 
 def test_generate_mermaid_text_with_output_file() -> None:
@@ -380,7 +400,9 @@ def test_build_dependency_graph_dynamic_reference() -> None:
     ) in dynamic_edges
 
 
-def test_generate_mermaid_text_dynamic_reference() -> None:
+def test_generate_mermaid_text_dynamic_reference(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     """Test generate_mermaid_text outputs cylindrical shape for dynamic references."""
     edges = [
         (
@@ -396,10 +418,75 @@ def test_generate_mermaid_text_dynamic_reference() -> None:
             "dynamic",
         ),
     ]
-    captured_output = io.StringIO()
-    sys.stdout = captured_output
     generate_mermaid_text(edges)
-    sys.stdout = sys.__stdout__
-    out = captured_output.getvalue()
+    out = capsys.readouterr().out
     assert "dynamic.yaml-->|ssm-secure|MyParam:1[(MyParam:1)]" in out  # noqa: S101
     assert "dynamic.yaml-->|ssm|TagParam:latest[(TagParam:latest)]" in out  # noqa: S101
+
+
+def test_generate_mermaid_text_dynamic_reference_with_var(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Test generate_mermaid_text.
+
+    This test ensures that dynamic references containing variables are normalized and
+    visualized correctly in Mermaid output.
+    """
+    edges = [
+        (
+            "rds.yml",
+            "{{resolve:secretsmanager:${MySecret}:SecretString:${username}}}",
+            "{{resolve:secretsmanager:${MySecret}:SecretString:${username}}}",
+            "dynamic",
+        ),
+    ]
+    generate_mermaid_text(edges)
+    out = capsys.readouterr().out
+    # Should normalize to $MySecret:SecretString:$username
+    expected = (
+        "rds.yml-->|secretsmanager|$MySecret:SecretString:$username"
+        "[($MySecret:SecretString:$username)]"
+    )
+    assert expected in out  # noqa: S101
+
+
+def test_version_output(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test that -V/--version prints version and exits."""
+    output = io.StringIO()
+    monkeypatch.setattr(sys, "stdout", output)
+    # Patch sys.exit to throw SystemExit
+    monkeypatch.setattr(
+        sys,
+        "exit",
+        lambda code=0: (_ for _ in ()).throw(SystemExit(code)),
+    )
+    # Patch version() to return a known value
+    monkeypatch.setattr("importlib.metadata.version", lambda _: "9.9.9")
+    try:
+        with pytest.raises(SystemExit):
+            print_version_and_exit()
+    finally:
+        monkeypatch.setattr(sys, "stdout", sys.__stdout__)
+    assert "cfn-template-dependency-visualization 9.9.9" in output.getvalue()  # noqa: S101
+
+
+def test_version_output_package_not_found(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test that version fallback to 'unknown' when PackageNotFoundError is raised."""
+    output = io.StringIO()
+    monkeypatch.setattr(sys, "stdout", output)
+    monkeypatch.setattr(
+        sys,
+        "exit",
+        lambda code=0: (_ for _ in ()).throw(SystemExit(code)),
+    )
+
+    def raise_package_not_found(_: object) -> None:
+        raise importlib.metadata.PackageNotFoundError
+
+    monkeypatch.setattr("importlib.metadata.version", raise_package_not_found)
+    try:
+        with pytest.raises(SystemExit):
+            print_version_and_exit()
+    finally:
+        monkeypatch.setattr(sys, "stdout", sys.__stdout__)
+    assert "cfn-template-dependency-visualization unknown" in output.getvalue()  # noqa: S101

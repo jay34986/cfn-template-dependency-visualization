@@ -7,8 +7,8 @@ Resources:
       AllocatedStorage: '20'
       DBInstanceClass: db.t2.micro
       Engine: mysql
-      MasterUsername: '{{resolve:secretsmanager:${MySecret}:SecretString:username}}'
-      MasterUserPassword: '{{resolve:secretsmanager:MySecret:SecretString:password:2}}'
+      MasterUsername: '{{resolve:secretsmanager:${MySecret}:SecretString:${username}}}'
+      MasterUserPassword: '{{resolve:secretsmanager:${MySecret}:SecretString:password:2}}'
 
   MyRDSInstance02:
     Type: 'AWS::RDS::DBInstance'
