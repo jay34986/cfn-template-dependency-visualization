@@ -1,6 +1,6 @@
 # CFn template dependency
 
 ```mermaid
-graph BT
+graph LR
     s3import.yaml-->|MyBucketExportName|s3export.yaml
 ```

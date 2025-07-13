@@ -1,10 +1,12 @@
 """Unit tests for main.py CloudFormation template utilities."""
 
+import importlib.metadata
 import io
 import sys
 import tempfile
 from pathlib import Path
 
+import pytest
 import yaml
 
 sys.path.append(str(Path(__file__).parent.parent.parent / "src" / "cfntdv"))
@@ -18,13 +20,14 @@ from main import (
     find_imports,
     generate_mermaid_text,
     parse_args,
+    print_version_and_exit,
 )
 
 
 def test_parse_args_default() -> None:
     """Test parse_args() with default arguments."""
     original_argv = sys.argv
-    sys.argv = [sys.argv[0]]  # sys.argvを修正する
+    sys.argv = [sys.argv[0]]  # Fix sys.argv
     try:
         args = parse_args()
         assert args.directory == "."  # noqa: S101
@@ -32,7 +35,7 @@ def test_parse_args_default() -> None:
         assert args.verbose is False  # noqa: S101
         assert args.direction == "LR"  # noqa: S101
     finally:
-        sys.argv = original_argv  # sys.argvを元に戻す
+        sys.argv = original_argv  # Revert sys.argv
 
 
 def test_parse_args_custom() -> None:
@@ -52,6 +55,28 @@ def test_parse_args_custom() -> None:
     assert args.output_file == "output.md"  # noqa: S101
     assert args.verbose is True  # noqa: S101
     assert args.direction == "BT"  # noqa: S101
+
+
+def test_parse_args_version() -> None:
+    """Test parse_args() with version argument."""
+    original_argv = sys.argv
+    sys.argv = [sys.argv[0], "-V"]
+    try:
+        args = parse_args()
+        assert args.version is True  # noqa: S101
+    finally:
+        sys.argv = original_argv
+
+
+def test_parse_args_version_long() -> None:
+    """Test parse_args() with long form version argument."""
+    original_argv = sys.argv
+    sys.argv = [sys.argv[0], "--version"]
+    try:
+        args = parse_args()
+        assert args.version is True  # noqa: S101
+    finally:
+        sys.argv = original_argv
 
 
 def test_find_cfn_templates() -> None:
@@ -89,7 +114,7 @@ def test_find_imports() -> None:
 def test_extract_exports_and_imports_basic() -> None:
     """Test extracting exports and imports from a basic CloudFormation template."""
     with tempfile.TemporaryDirectory() as tmpdir:
-        # Export/Importのあるテンプレート
+        # Templates with Export/Import
         path = Path(tmpdir) / "sample.yaml"
         content = {
             "Outputs": {"ExportedValue": {"Export": {"Name": "MyExport"}}},
@@ -142,6 +167,60 @@ def test_extract_exports_and_imports_importvalue_list() -> None:
         assert "TagExport2" in result["imports"]  # noqa: S101
 
 
+def test_extract_exports_and_imports_dynamic_reference() -> None:
+    """Test extracting dynamic references from a CloudFormation template."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        path = Path(tmpdir) / "dynamic.yaml"
+        content = {
+            "Resources": {
+                "MyRes": {
+                    "Type": "AWS::S3::Bucket",
+                    "Properties": {
+                        "BucketName": "{{resolve:ssm-secure:MyParam:1}}",
+                        "Tags": [
+                            {"Key": "foo", "Value": "{{resolve:ssm:TagParam:latest}}"},
+                        ],
+                    },
+                },
+            },
+        }
+        create_yaml(path, content)
+        result = extract_exports_and_imports(path)
+        assert "{{resolve:ssm-secure:MyParam:1}}" in result["dynamics"]  # noqa: S101
+        assert "{{resolve:ssm:TagParam:latest}}" in result["dynamics"]  # noqa: S101
+
+
+def test_extract_exports_and_imports_dynamic_reference_with_var() -> None:
+    """Test extracting dynamic references with ${...} from a CloudFormation template."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        path = Path(tmpdir) / "rds.yml"
+        content = {
+            "Resources": {
+                "DBInstance": {
+                    "Type": "AWS::RDS::DBInstance",
+                    "Properties": {
+                        "MasterUsername": (
+                            "{{resolve:secretsmanager:${MySecret}:SecretString:username}}"
+                        ),
+                        "MasterUserPassword": (
+                            "{{resolve:secretsmanager:${MySecret}:SecretString:password}}"
+                        ),
+                    },
+                },
+            },
+        }
+        create_yaml(path, content)
+        result = extract_exports_and_imports(path)
+        assert (  # noqa: S101
+            "{{resolve:secretsmanager:${MySecret}:SecretString:username}}"
+            in result["dynamics"]
+        )
+        assert (  # noqa: S101
+            "{{resolve:secretsmanager:${MySecret}:SecretString:password}}"
+            in result["dynamics"]
+        )
+
+
 EXPECTED_TEMPLATE_COUNT = 2
 
 
@@ -191,8 +270,18 @@ def test_build_dependency_graph() -> None:
     assert "Export2" in nodes  # noqa: S101
     assert isinstance(edges, list)  # noqa: S101
     assert len(edges) == EXPECTED_EDGE_COUNT  # noqa: S101
-    assert ("template2.yaml", "template1.yaml", "Export1") in edges  # noqa: S101
-    assert ("template3.yaml", "template2.yaml", "Export2") in edges  # noqa: S101
+    assert (  # noqa: S101
+        "template2.yaml",
+        "template1.yaml",
+        "Export1",
+        "import",
+    ) in edges
+    assert (  # noqa: S101
+        "template3.yaml",
+        "template2.yaml",
+        "Export2",
+        "import",
+    ) in edges
 
 
 def test_check_self_reference() -> None:
@@ -223,43 +312,37 @@ def test_check_self_reference_no_warning() -> None:
     assert captured_output.getvalue() == ""  # noqa: S101
 
 
-def test_generate_mermaid_text() -> None:
+def test_generate_mermaid_text(capsys: pytest.CaptureFixture[str]) -> None:
     """Test the generate_mermaid_text function."""
     edges = [
-        ("template1.yaml", "template2.yaml", "Export1"),
-        ("template2.yaml", "template3.yaml", "Export2"),
+        ("template1.yaml", "template2.yaml", "Export1", "import"),
+        ("template2.yaml", "template3.yaml", "Export2", "import"),
     ]
-    captured_output = io.StringIO()
-    sys.stdout = captured_output
-    generate_mermaid_text(edges)  # デフォルトはLR
-    sys.stdout = sys.__stdout__
-    assert captured_output.getvalue().startswith(  # noqa: S101
-        "# CFn template dependency\n\n```mermaid",
-    )
-    assert "graph LR" in captured_output.getvalue()  # noqa: S101
-    assert "template1.yaml-->|Export1|template2.yaml" in captured_output.getvalue()  # noqa: S101
-    assert "template2.yaml-->|Export2|template3.yaml" in captured_output.getvalue()  # noqa: S101
-    assert captured_output.getvalue().endswith("```\n\n")  # noqa: S101
+    generate_mermaid_text(edges)
+    out = capsys.readouterr().out
+    assert out.startswith("# CFn template dependency\n\n```mermaid")  # noqa: S101
+    assert "graph LR" in out  # noqa: S101
+    assert "template1.yaml-->|Export1|template2.yaml" in out  # noqa: S101
+    assert "template2.yaml-->|Export2|template3.yaml" in out  # noqa: S101
+    assert out.endswith("```\n\n")  # noqa: S101
 
 
-def test_generate_mermaid_text_bt() -> None:
+def test_generate_mermaid_text_bt(capsys: pytest.CaptureFixture[str]) -> None:
     """Test the generate_mermaid_text function with BT direction."""
     edges = [
-        ("template1.yaml", "template2.yaml", "Export1"),
-        ("template2.yaml", "template3.yaml", "Export2"),
+        ("template1.yaml", "template2.yaml", "Export1", "import"),
+        ("template2.yaml", "template3.yaml", "Export2", "import"),
     ]
-    captured_output = io.StringIO()
-    sys.stdout = captured_output
     generate_mermaid_text(edges, direction="BT")
-    sys.stdout = sys.__stdout__
-    assert "graph BT" in captured_output.getvalue()  # noqa: S101
+    out = capsys.readouterr().out
+    assert "graph BT" in out  # noqa: S101
 
 
 def test_generate_mermaid_text_with_output_file() -> None:
     """Test the generate_mermaid_text function with an output file."""
     edges = [
-        ("template1.yaml", "template2.yaml", "Export1"),
-        ("template2.yaml", "template3.yaml", "Export2"),
+        ("template1.yaml", "template2.yaml", "Export1", "import"),
+        ("template2.yaml", "template3.yaml", "Export2", "import"),
     ]
     with tempfile.TemporaryDirectory() as tmpdir:
         output_file = Path(tmpdir) / "output.md"
@@ -277,8 +360,8 @@ def test_generate_mermaid_text_with_output_file() -> None:
 def test_generate_mermaid_text_with_output_file_default_direction() -> None:
     """Test generate_mermaid_text writes 'graph LR' when direction is omitted and writing to a file."""  # noqa: E501
     edges = [
-        ("template1.yaml", "template2.yaml", "Export1"),
-        ("template2.yaml", "template3.yaml", "Export2"),
+        ("template1.yaml", "template2.yaml", "Export1", "import"),
+        ("template2.yaml", "template3.yaml", "Export2", "import"),
     ]
     with tempfile.TemporaryDirectory() as tmpdir:
         output_file = Path(tmpdir) / "output_default.md"
@@ -287,3 +370,123 @@ def test_generate_mermaid_text_with_output_file_default_direction() -> None:
         with output_file.open() as f:
             mermaid_text = f.read()
             assert "graph LR" in mermaid_text  # noqa: S101
+
+
+def test_build_dependency_graph_dynamic_reference() -> None:
+    """Test build_dependency_graph includes dynamic reference edges."""
+    template_info = {
+        "dynamic.yaml": {
+            "exports": [],
+            "imports": [],
+            "dynamics": [
+                "{{resolve:ssm-secure:MyParam:1}}",
+                "{{resolve:ssm:TagParam:latest}}",
+            ],
+        },
+    }
+    nodes, edges = build_dependency_graph(template_info)
+    dynamic_edges = [e for e in edges if e[3] == "dynamic"]
+    assert (  # noqa: S101
+        "dynamic.yaml",
+        "{{resolve:ssm-secure:MyParam:1}}",
+        "{{resolve:ssm-secure:MyParam:1}}",
+        "dynamic",
+    ) in dynamic_edges
+    assert (  # noqa: S101
+        "dynamic.yaml",
+        "{{resolve:ssm:TagParam:latest}}",
+        "{{resolve:ssm:TagParam:latest}}",
+        "dynamic",
+    ) in dynamic_edges
+
+
+def test_generate_mermaid_text_dynamic_reference(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Test generate_mermaid_text outputs cylindrical shape for dynamic references."""
+    edges = [
+        (
+            "dynamic.yaml",
+            "{{resolve:ssm-secure:MyParam:1}}",
+            "{{resolve:ssm-secure:MyParam:1}}",
+            "dynamic",
+        ),
+        (
+            "dynamic.yaml",
+            "{{resolve:ssm:TagParam:latest}}",
+            "{{resolve:ssm:TagParam:latest}}",
+            "dynamic",
+        ),
+    ]
+    generate_mermaid_text(edges)
+    out = capsys.readouterr().out
+    assert "dynamic.yaml-->|ssm-secure|MyParam:1[(MyParam:1)]" in out  # noqa: S101
+    assert "dynamic.yaml-->|ssm|TagParam:latest[(TagParam:latest)]" in out  # noqa: S101
+
+
+def test_generate_mermaid_text_dynamic_reference_with_var(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Test generate_mermaid_text.
+
+    This test ensures that dynamic references containing variables are normalized and
+    visualized correctly in Mermaid output.
+    """
+    edges = [
+        (
+            "rds.yml",
+            "{{resolve:secretsmanager:${MySecret}:SecretString:${username}}}",
+            "{{resolve:secretsmanager:${MySecret}:SecretString:${username}}}",
+            "dynamic",
+        ),
+    ]
+    generate_mermaid_text(edges)
+    out = capsys.readouterr().out
+    # Should normalize to $MySecret:SecretString:$username
+    expected = (
+        "rds.yml-->|secretsmanager|$MySecret:SecretString:$username"
+        "[($MySecret:SecretString:$username)]"
+    )
+    assert expected in out  # noqa: S101
+
+
+def test_version_output(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test that -V/--version prints version and exits."""
+    output = io.StringIO()
+    monkeypatch.setattr(sys, "stdout", output)
+    # Patch sys.exit to throw SystemExit
+    monkeypatch.setattr(
+        sys,
+        "exit",
+        lambda code=0: (_ for _ in ()).throw(SystemExit(code)),
+    )
+    # Patch version() to return a known value
+    monkeypatch.setattr("importlib.metadata.version", lambda _: "9.9.9")
+    try:
+        with pytest.raises(SystemExit):
+            print_version_and_exit()
+    finally:
+        monkeypatch.setattr(sys, "stdout", sys.__stdout__)
+    assert "cfn-template-dependency-visualization 9.9.9" in output.getvalue()  # noqa: S101
+
+
+def test_version_output_package_not_found(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test that version fallback to 'unknown' when PackageNotFoundError is raised."""
+    output = io.StringIO()
+    monkeypatch.setattr(sys, "stdout", output)
+    monkeypatch.setattr(
+        sys,
+        "exit",
+        lambda code=0: (_ for _ in ()).throw(SystemExit(code)),
+    )
+
+    def raise_package_not_found(_: object) -> None:
+        raise importlib.metadata.PackageNotFoundError
+
+    monkeypatch.setattr("importlib.metadata.version", raise_package_not_found)
+    try:
+        with pytest.raises(SystemExit):
+            print_version_and_exit()
+    finally:
+        monkeypatch.setattr(sys, "stdout", sys.__stdout__)
+    assert "cfn-template-dependency-visualization unknown" in output.getvalue()  # noqa: S101

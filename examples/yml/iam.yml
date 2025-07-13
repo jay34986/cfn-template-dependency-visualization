@@ -1,0 +1,15 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Resources:
+  MyIAMUser01:
+    Type: AWS::IAM::User
+    Properties:
+      UserName: 'MyUserName'
+      LoginProfile:
+        Password: '{{resolve:ssm-secure:IAMUserPassword:10}}'
+
+  MyIAMUser02:
+    Type: AWS::IAM::User
+    Properties:
+      UserName: 'MyUserName'
+      LoginProfile:
+        Password: '{{resolve:ssm-secure:IAMUserPassword}}'

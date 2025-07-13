@@ -17,3 +17,19 @@ Resources:
       AvailabilityZone: ap-northeast-1a
       ImageId: ami-0ff21806645c5e492
       IamInstanceProfile: !ImportValue InstanceProfileName
+
+  MyLaunchTemplate01:
+    Type: AWS::EC2::LaunchTemplate
+    Properties: 
+      LaunchTemplateName: !Sub ${AWS::StackName}-launch-template
+      LaunchTemplateData:
+        ImageId: '{{resolve:ssm:golden-ami:2}}'
+        InstanceType: t2.micro
+
+  MyLaunchTemplate02:
+    Type: AWS::EC2::LaunchTemplate
+    Properties: 
+      LaunchTemplateName: !Sub ${AWS::StackName}-launch-template
+      LaunchTemplateData:
+        ImageId: '{{resolve:ssm:golden-ami}}'
+        InstanceType: t2.micro

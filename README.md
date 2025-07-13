@@ -1,6 +1,13 @@
 # AWS CloudFormation Template Dependency Visualization
 
-It parses Export and ImportValue from YAML formatted CFn template files and outputs dependencies in Mermaid format.
+Parses the following from a YAML formatted CFn template file and outputs dependencies in Mermaid format:
+
+- Export and ImportValue
+- dynamic references
+  - Getting the entire secret for MySecret, such as {{resolve:secretsmanager:MySecret}}, is not supported.
+  - In Mermaid output, dynamic reference dependencies are drawn as cylindrical shape nodes.
+  - The edge label (arrow label) in Mermaid is the service name:
+    `ssm`, `ssm-secure`, or `secretsmanager`, and the node name is only the parameter part of the dynamic reference.
 
 ## Install
 
@@ -12,6 +19,16 @@ Install it using pipx.
 pipx install git+https://github.com/jay34986/cfn-template-dependency-visualization.git
 ```
 
+## Version
+
+You can check the version of the tool with the following command:
+
+```bash
+cfn-tdv -V
+# or
+cfn-tdv --version
+```
+
 ## Basic Usage
 
 If you run the cfn-tdv command without any arguments, it analyzes files with .yaml and .yml extensions in the current directory.  
@@ -20,7 +37,11 @@ The following example shows that s3import.yaml references MyBucketExportName, wh
 
 ```mermaid
 graph LR
-    s3import.yaml-->|MyBucketExportName|s3export.yaml
+    ec2.yml-->|InstanceProfileName|instanceprofile.yml
+    ec2.yml-->|VpcStackPublicSubnet|vpc.yml
+    ec2.yml-->|VpcStackSecurityGroup|vpc.yml
+    ec2.yml-->|ssm|golden-ami:2[(golden-ami:2)]
+    instanceprofile.yml-->|ArnS3Bucket|s3.yml
 ```
 
 Use the `-d` option to specify the directory where the CFn templates are saved.  
@@ -62,10 +83,15 @@ cfn-tdv -d examples/yml
 
 ```mermaid
 graph LR
-    vpc.yml-->|VpcStackSecurityGroup|vpc.yml
-    vpc.yml-->|VpcStackPublicSubnet|vpc.yml
-    instanceprofile.yml-->|ArnS3Bucket|s3.yml
-    ec2.yml-->|VpcStackSecurityGroup|vpc.yml
-    ec2.yml-->|VpcStackPublicSubnet|vpc.yml
     ec2.yml-->|InstanceProfileName|instanceprofile.yml
+    ec2.yml-->|VpcStackPublicSubnet|vpc.yml
+    ec2.yml-->|VpcStackSecurityGroup|vpc.yml
+    instanceprofile.yml-->|ArnS3Bucket|s3.yml
+    vpc.yml-->|VpcStackPublicSubnet|vpc.yml
+    vpc.yml-->|VpcStackSecurityGroup|vpc.yml
 ```
+
+## Output order is stable
+
+The dependency lines in the Mermaid output are sorted by file name, export name, and dynamic reference content.  
+This ensures that the output order is stable and does not change between runs.

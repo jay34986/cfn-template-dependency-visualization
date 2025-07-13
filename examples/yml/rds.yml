@@ -1,0 +1,21 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Resources:
+  MyRDSInstance01:
+    Type: 'AWS::RDS::DBInstance'
+    Properties:
+      DBName: MyRDSInstance
+      AllocatedStorage: '20'
+      DBInstanceClass: db.t2.micro
+      Engine: mysql
+      MasterUsername: '{{resolve:secretsmanager:${MySecret}:SecretString:${username}}}'
+      MasterUserPassword: '{{resolve:secretsmanager:${MySecret}:SecretString:password:2}}'
+
+  MyRDSInstance02:
+    Type: 'AWS::RDS::DBInstance'
+    Properties:
+      DBName: MyRDSInstance
+      AllocatedStorage: '20'
+      DBInstanceClass: db.t2.micro
+      Engine: mysql
+      MasterUsername: '{{resolve:secretsmanager:arn:aws:secretsmanager:us-west-2:123456789012:secret:MySecret:SecretString:username}}'
+      MasterUserPassword: '{{resolve:secretsmanager:arn:aws:secretsmanager:us-west-2:123456789012:secret:MySecret:SecretString:password:2}}'
