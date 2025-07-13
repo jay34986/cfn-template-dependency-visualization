@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib.metadata
 import json
 import re
 import sys
@@ -20,7 +21,14 @@ DYN_NODE_PATTERN = re.compile(r"\{\{resolve:(ssm|ssm-secure|secretsmanager):(.+?
 
 def normalize_dynamic_node(node: str) -> str:
     """Convert ${Var} to $Var for Mermaid node names."""
-    return re.sub(r"\$\{([A-Za-z0-9_]+)\}", r"$\1", node)
+    # Replace all ${Var} with $Var, including nested and multiple variables
+    # This also supports cases like ${MySecret}:SecretString:${username}
+    # Example: converts a dynamic reference with variables to normalized form
+    #   -> '$MySecret:SecretString:$username'
+    # Remove any remaining '{' or '}' that are not part of the dynamic reference
+    normalized = re.sub(r"\$\{([A-Za-z0-9_]+)\}", r"$\1", node)
+    # Remove any unmatched '{' or '}' (e.g. from broken parsing)
+    return normalized.replace("{", "").replace("}", "")
 
 
 # Colorama Initialization
@@ -62,7 +70,26 @@ def parse_args() -> argparse.Namespace:
             "Default: LR"
         ),
     )
+    parser.add_argument(
+        "-V",
+        "--version",
+        action="store_true",
+        help="Show program version and exit",
+    )
     return parser.parse_args(args=sys.argv[1:])
+
+
+PACKAGE_NAME = "cfn-template-dependency-visualization"
+
+
+def print_version_and_exit() -> None:
+    """Print the package version and exit."""
+    try:
+        pkg_version = importlib.metadata.version(PACKAGE_NAME)
+    except importlib.metadata.PackageNotFoundError:
+        pkg_version = "unknown"
+    sys.stdout.write(f"{PACKAGE_NAME} {pkg_version}\n")
+    sys.exit(0)
 
 
 def find_cfn_templates(directory: str) -> list[str]:
@@ -200,13 +227,23 @@ def generate_mermaid_text(
     for src, dst, imp, typ in edges:
         src_name = Path(src).name if src not in ("(unknown)",) else src
         if typ == "dynamic":
+            # Try to extract service and parameter part from dynamic reference
             m = DYN_NODE_PATTERN.fullmatch(imp)
             if m:
                 label = m.group(1)
                 node = normalize_dynamic_node(m.group(2))
             else:
-                label = "dynamic"
-                node = normalize_dynamic_node(imp)
+                # Try to match more complex patterns for dynamic references
+                dyn_match = re.fullmatch(
+                    r"\{\{resolve:(ssm|ssm-secure|secretsmanager):(.+?)}}",
+                    imp,
+                )
+                if dyn_match:
+                    label = dyn_match.group(1)
+                    node = normalize_dynamic_node(dyn_match.group(2))
+                else:
+                    label = "dynamic"
+                    node = normalize_dynamic_node(imp)
             edge_lines.append(f"    {src_name}-->|{label}|{node}[({node})]")
         else:
             dst_name = Path(dst).name if dst not in ("(unknown)",) else dst
@@ -226,6 +263,8 @@ def generate_mermaid_text(
 def main() -> None:
     """Run the CloudFormation dependency visualization tool."""
     args = parse_args()
+    if getattr(args, "version", False):
+        print_version_and_exit()
     templates = find_cfn_templates(args.directory)
     template_info = collect_template_info(templates, verbose=args.verbose)
     _, edges = build_dependency_graph(template_info)
