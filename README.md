@@ -33,7 +33,7 @@ cfn-tdv --version
 
 If you run the cfn-tdv command without any arguments, it analyzes files with .yaml and .yml extensions in the current directory.  
 The analysis results are output to standard output in Mermaid format as shown below.  
-The following example shows that s3import.yaml references MyBucketExportName, which is exported in s3export.yaml.  
+The following example shows that instanceprofile.yml references ArnS3Bucket, which is exported in s3.yml.  
 
 ```mermaid
 graph LR

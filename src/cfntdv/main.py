@@ -142,6 +142,7 @@ def extract_exports_and_imports(filepath: str) -> dict:
                 Fore.RED
                 + Style.BRIGHT
                 + f"[ERROR] Failed to parse YAML in {filepath} : {e}",
+                file=sys.stderr,
             )
             sys.exit(1)
     exports = set()
@@ -253,8 +254,31 @@ def generate_mermaid_text(
     mermaid_lines.append("```\n")
     mermaid_text = "\n".join(mermaid_lines)
     if output_file:
-        with Path(output_file).open("w", encoding="utf-8") as f:
-            f.write(mermaid_text)
+        try:
+            with Path(output_file).open("w", encoding="utf-8") as f:
+                f.write(mermaid_text)
+        except IsADirectoryError:
+            print(  # noqa: T201
+                Fore.RED + Style.BRIGHT + f"[ERROR] Is a directory: {output_file}",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+        except FileNotFoundError:
+            print(  # noqa: T201
+                Fore.RED
+                + Style.BRIGHT
+                + f"[ERROR] Output directory not found: {output_file}",
+                file=sys.stderr,
+            )
+            sys.exit(3)
+        except PermissionError:
+            print(  # noqa: T201
+                Fore.RED
+                + Style.BRIGHT
+                + f"[ERROR] Permission denied when writing to: {output_file}",
+                file=sys.stderr,
+            )
+            sys.exit(4)
         print(f"Mermaid notation has been output to {output_file}.")  # noqa: T201
     else:
         print(mermaid_text)  # noqa: T201
