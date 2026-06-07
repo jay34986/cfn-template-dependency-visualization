@@ -35,11 +35,17 @@ If you run the cfn-tdv command without any arguments, it analyzes files with .ya
 The analysis results are output to standard output in Mermaid format as shown below.  
 The following example shows that instanceprofile.yml references ArnS3Bucket, which is exported in s3.yml.  
 
+If each part of a node is connected by a solid line, it indicates that it is referenced using `Fn::ImportValue`.  
+If each part of a node is connected by a dotted line, it indicates that it is referenced using `Fn::GetStackOutput`.  
+If a cylindrical node is connected by a solid line, it indicates that it is referenced using one of the following services:
+`ssm`, `ssm-secure`, or `secretsmanager`.  
+The service being used is output along with the solid line.
+
 ```mermaid
 graph LR
-    ec2.yml-->|InstanceProfileName|instanceprofile.yml
     ec2.yml-->|VpcStackPublicSubnet|vpc.yml
     ec2.yml-->|VpcStackSecurityGroup|vpc.yml
+    ec2.yml-. InstanceProfile .->instanceprofile.yml
     ec2.yml-->|ssm|golden-ami:2[(golden-ami:2)]
     instanceprofile.yml-->|ArnS3Bucket|s3.yml
 ```
@@ -95,3 +101,9 @@ graph LR
 
 The dependency lines in the Mermaid output are sorted by file name, export name, and dynamic reference content.  
 This ensures that the output order is stable and does not change between runs.
+
+## Restrictions
+
+`Fn::GetStackOutput` requires a `StackName` to parse,
+but this tool parses based on a template file and therefore cannot obtain the `StackName` from `CloudFormation`.  
+Therefore, it parses the part of the template file before the extension as the `StackName`.
