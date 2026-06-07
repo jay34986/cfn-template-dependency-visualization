@@ -16,7 +16,9 @@ Resources:
     Properties:
       AvailabilityZone: ap-northeast-1a
       ImageId: ami-0ff21806645c5e492
-      IamInstanceProfile: !ImportValue InstanceProfileName
+      IamInstanceProfile: !GetStackOutput
+        StackName: instanceprofile
+        OutputName: InstanceProfile
 
   MyLaunchTemplate01:
     Type: AWS::EC2::LaunchTemplate

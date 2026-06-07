@@ -7,8 +7,9 @@ import importlib.metadata
 import json
 import re
 import sys
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from cfn_flip import to_json
 from colorama import Fore, Style, init
@@ -17,6 +18,7 @@ from colorama import Fore, Style, init
 DYNAMIC_REF_PATTERN = re.compile(r"\{\{resolve:.*?}}")
 # Also supports secretsmanager:${MySecret}:SecretString:username
 DYN_NODE_PATTERN = re.compile(r"\{\{resolve:(ssm|ssm-secure|secretsmanager):(.+?)}}")
+GET_STACK_OUTPUT_KEY = "Fn::GetStackOutput"
 
 
 def normalize_dynamic_node(node: str) -> str:
@@ -92,7 +94,7 @@ def print_version_and_exit() -> None:
     sys.exit(0)
 
 
-def find_cfn_templates(directory: str) -> list[str]:
+def find_cfn_templates(directory: str) -> list[Path]:
     """Find all CloudFormation template files (.yaml, .yml) in the specified directory recursively."""  # noqa: E501
     target_dir = Path(directory)
     return list(target_dir.glob("*.yml")) + list(target_dir.glob("*.yaml"))
@@ -111,6 +113,25 @@ def find_imports(obj: dict[str, Any] | list[Any], imports: set[str]) -> None:
             find_imports(item, imports)
 
 
+def find_stack_outputs(
+    obj: object,
+    stack_outputs: set[tuple[str, str]],
+) -> None:
+    """Recursively find all Fn::GetStackOutput references in the given object."""
+    if isinstance(obj, dict):
+        for key, value in obj.items():
+            if key == GET_STACK_OUTPUT_KEY and isinstance(value, dict):
+                stack_output = cast(dict[str, object], value)
+                stack_name = stack_output.get("StackName")
+                output_name = stack_output.get("OutputName")
+                if isinstance(stack_name, str) and isinstance(output_name, str):
+                    stack_outputs.add((stack_name, output_name))
+            find_stack_outputs(value, stack_outputs)
+    elif isinstance(obj, list):
+        for item in obj:
+            find_stack_outputs(item, stack_outputs)
+
+
 def find_dynamic_references(obj: object, dynamics: set[str]) -> None:
     """Recursively find all dynamic references ({{resolve:...}}) in the given object.
 
@@ -127,27 +148,27 @@ def find_dynamic_references(obj: object, dynamics: set[str]) -> None:
             dynamics.add(match)
 
 
-def extract_exports_and_imports(filepath: str) -> dict:
+def extract_exports_and_imports(filepath: str | Path) -> dict:
     """Extract dependencies from a CloudFormation template file.
 
     Extract exported, imported values, and dynamic references from a CloudFormation
     template file.
-    Returns a dict with keys 'exports', 'imports', and 'dynamics'.
+    Returns a dict with keys 'exports', 'imports', 'dynamics', and
+    'stack_outputs'.
     """
     with Path(filepath).open(encoding="utf-8") as f:
         try:
             data = to_json(f.read(), clean_up=True)  # Convert YAML to JSON
         except json.JSONDecodeError as e:
             print(  # noqa: T201
-                Fore.RED
-                + Style.BRIGHT
-                + f"[ERROR] Failed to parse YAML in {filepath} : {e}",
+                f"{Fore.RED}{Style.BRIGHT}[ERROR] Failed to parse YAML in {filepath} : {e}",
                 file=sys.stderr,
             )
             sys.exit(1)
     exports = set()
     imports = set()
     dynamics = set()
+    stack_outputs = set()
 
     # Convert JSON to Python dictionary
     parsed_data = json.loads(data)
@@ -163,12 +184,23 @@ def extract_exports_and_imports(filepath: str) -> dict:
 
     # Fn::ImportValue reference extraction
     find_imports(parsed_data, imports)
+    # Fn::GetStackOutput weak reference extraction
+    find_stack_outputs(parsed_data, stack_outputs)
     # Dynamic reference extraction
     find_dynamic_references(parsed_data, dynamics)
-    return {"exports": exports, "imports": imports, "dynamics": dynamics}
+    return {
+        "exports": exports,
+        "imports": imports,
+        "dynamics": dynamics,
+        "stack_outputs": stack_outputs,
+    }
 
 
-def collect_template_info(templates: list[str], *, verbose: bool = False) -> dict:
+def collect_template_info(
+    templates: Sequence[str | Path],
+    *,
+    verbose: bool = False,
+) -> dict:
     """Collect export/import/dynamic info from each template."""
     template_info = {}
     if verbose:
@@ -182,7 +214,9 @@ def collect_template_info(templates: list[str], *, verbose: bool = False) -> dic
 def build_dependency_graph(template_info: dict) -> tuple[dict, list]:
     """Build dependency graph nodes and edges (including dynamic references)."""
     nodes = {}
+    stack_nodes = {}
     for path, info in template_info.items():
+        stack_nodes[Path(path).stem] = path
         for export in info["exports"]:
             nodes[export] = path
     edges = []
@@ -192,6 +226,15 @@ def build_dependency_graph(template_info: dict) -> tuple[dict, list]:
                 edges.append((path, nodes[imp], imp, "import"))
             else:
                 edges.append((path, "(unknown)", imp, "import"))
+        for stack_name, output_name in info.get("stack_outputs", set()):
+            edges.append(
+                (
+                    path,
+                    stack_nodes.get(stack_name, "(unknown)"),
+                    output_name,
+                    "stack_output",
+                )
+            )
         # Since the dynamic reference is an external resource reference,
         # dst is the dynamic reference name itself.
         # AWS: https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/dynamic-references.html
@@ -205,9 +248,7 @@ def check_self_reference(template_info: dict) -> None:
         for imp in info["imports"]:
             if imp in info["exports"]:
                 print(  # noqa: T201
-                    Fore.YELLOW
-                    + Style.BRIGHT
-                    + f"[WARNING] {path} references its own Cfn template's Export({imp}) using Fn::ImportValue or !ImportValue.",  # noqa: E501
+                    f"{Fore.YELLOW}{Style.BRIGHT}[WARNING] {path} references its own Cfn template's Export({imp}) using Fn::ImportValue or !ImportValue.",  # noqa: E501
                     file=sys.stderr,
                 )
 
@@ -246,6 +287,9 @@ def generate_mermaid_text(
                     label = "dynamic"
                     node = normalize_dynamic_node(imp)
             edge_lines.append(f"    {src_name}-->|{label}|{node}[({node})]")
+        elif typ == "stack_output":
+            dst_name = Path(dst).name if dst not in ("(unknown)",) else dst
+            edge_lines.append(f"    {src_name}-. {imp} .->{dst_name}")
         else:
             dst_name = Path(dst).name if dst not in ("(unknown)",) else dst
             edge_lines.append(f"    {src_name}-->|{imp}|{dst_name}")
@@ -259,23 +303,19 @@ def generate_mermaid_text(
                 f.write(mermaid_text)
         except IsADirectoryError:
             print(  # noqa: T201
-                Fore.RED + Style.BRIGHT + f"[ERROR] Is a directory: {output_file}",
+                f"{Fore.RED}{Style.BRIGHT}[ERROR] Is a directory: {output_file}",
                 file=sys.stderr,
             )
             sys.exit(2)
         except FileNotFoundError:
             print(  # noqa: T201
-                Fore.RED
-                + Style.BRIGHT
-                + f"[ERROR] Output directory not found: {output_file}",
+                f"{Fore.RED}{Style.BRIGHT}[ERROR] Output directory not found: {output_file}",
                 file=sys.stderr,
             )
             sys.exit(3)
         except PermissionError:
             print(  # noqa: T201
-                Fore.RED
-                + Style.BRIGHT
-                + f"[ERROR] Permission denied when writing to: {output_file}",
+                f"{Fore.RED}{Style.BRIGHT}[ERROR] Permission denied when writing to: {output_file}",
                 file=sys.stderr,
             )
             sys.exit(4)

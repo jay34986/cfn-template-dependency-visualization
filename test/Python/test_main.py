@@ -9,9 +9,9 @@ from pathlib import Path
 import pytest
 import yaml
 
-sys.path.append(str(Path(__file__).parent.parent.parent / "src" / "cfntdv"))
+sys.path.append(str(Path(__file__).parent.parent.parent / "src"))
 
-from main import (
+from cfntdv.main import (
     build_dependency_graph,
     check_self_reference,
     collect_template_info,
@@ -89,7 +89,7 @@ def test_find_cfn_templates() -> None:
         assert path1 in found  # noqa: S101
 
 
-def create_yaml(path: str, content: dict) -> None:
+def create_yaml(path: str | Path, content: dict) -> None:
     """Create a YAML file at the given path with the provided content."""
     with Path(path).open("w", encoding="utf-8") as f:
         yaml.dump(content, f, allow_unicode=True)
@@ -221,6 +221,30 @@ def test_extract_exports_and_imports_dynamic_reference_with_var() -> None:
         )
 
 
+def test_extract_exports_and_imports_get_stack_output() -> None:
+    """Test extracting Fn::GetStackOutput weak references."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        path = Path(tmpdir) / "consumer.yaml"
+        content = {
+            "Resources": {
+                "MyRes": {
+                    "Type": "AWS::EC2::Instance",
+                    "Properties": {
+                        "VpcId": {
+                            "Fn::GetStackOutput": {
+                                "StackName": "ProducerStack",
+                                "OutputName": "VpcId",
+                            },
+                        },
+                    },
+                },
+            },
+        }
+        create_yaml(path, content)
+        result = extract_exports_and_imports(path)
+        assert ("ProducerStack", "VpcId") in result["stack_outputs"]  # noqa: S101
+
+
 EXPECTED_TEMPLATE_COUNT = 2
 
 
@@ -250,6 +274,7 @@ def test_collect_template_info() -> None:
             assert isinstance(info, dict)  # noqa: S101
             assert "exports" in info  # noqa: S101
             assert "imports" in info  # noqa: S101
+            assert "stack_outputs" in info  # noqa: S101
 
 
 EXPECTED_NODE_COUNT = 2
@@ -384,7 +409,7 @@ def test_build_dependency_graph_dynamic_reference() -> None:
             ],
         },
     }
-    nodes, edges = build_dependency_graph(template_info)
+    _, edges = build_dependency_graph(template_info)
     dynamic_edges = [e for e in edges if e[3] == "dynamic"]
     assert (  # noqa: S101
         "dynamic.yaml",
@@ -398,6 +423,26 @@ def test_build_dependency_graph_dynamic_reference() -> None:
         "{{resolve:ssm:TagParam:latest}}",
         "dynamic",
     ) in dynamic_edges
+
+
+def test_build_dependency_graph_get_stack_output() -> None:
+    """Test build_dependency_graph resolves Fn::GetStackOutput targets by stack name."""
+    template_info = {
+        "ProducerStack.yml": {
+            "exports": [],
+            "imports": [],
+            "dynamics": [],
+            "stack_outputs": set(),
+        },
+        "ec2.yml": {
+            "exports": [],
+            "imports": [],
+            "dynamics": [],
+            "stack_outputs": {("ProducerStack", "VpcId")},
+        },
+    }
+    _, edges = build_dependency_graph(template_info)
+    assert ("ec2.yml", "ProducerStack.yml", "VpcId", "stack_output") in edges  # noqa: S101
 
 
 def test_generate_mermaid_text_dynamic_reference(
@@ -448,6 +493,16 @@ def test_generate_mermaid_text_dynamic_reference_with_var(
         "[($MySecret:SecretString:$username)]"
     )
     assert expected in out  # noqa: S101
+
+
+def test_generate_mermaid_text_get_stack_output(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Test generate_mermaid_text outputs Fn::GetStackOutput dependencies."""
+    edges = [("ec2.yml", "ProducerStack.yml", "VpcId", "stack_output")]
+    generate_mermaid_text(edges)
+    out = capsys.readouterr().out
+    assert "ec2.yml-. VpcId .->ProducerStack.yml" in out  # noqa: S101
 
 
 def test_version_output(monkeypatch: pytest.MonkeyPatch) -> None:

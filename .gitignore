@@ -174,3 +174,10 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+# VS Code settings
+.vscode/
+.github/instructions
+.github/skills
+.secretlintrc.json
+copilot-instructions.md

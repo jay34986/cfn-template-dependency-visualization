@@ -1,0 +1,11 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+Resources:
+  MyInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      VpcId: !GetStackOutput
+        StackName: ProducerStack
+        OutputName: VpcId
+        RoleArn: arn:aws:iam::111111111111:role/GetStackOutputRole
+        Region: us-west-2
